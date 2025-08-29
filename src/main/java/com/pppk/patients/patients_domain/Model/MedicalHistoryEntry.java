@@ -5,7 +5,7 @@ import lombok.Getter;
 
 @Getter
 public final class MedicalHistoryEntry {
-    private final Long id;
+    private  Long id;
     private final String diseaseName;
     private final DateRange period;
     public MedicalHistoryEntry(Long id, String diseaseName, DateRange period) {

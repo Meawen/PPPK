@@ -1,15 +1,14 @@
-package com.pppk.patients.patients_domain.Model;// Patient.java
+package com.pppk.patients.patients_domain.Model;
 
 import com.pppk.patients.patients_domain.exception.DuplicateOibException;
 import com.pppk.patients.patients_domain.port.OibUniquenessChecker;
 import com.pppk.patients.patients_domain.vo.*;
 import lombok.Getter;
-import lombok.Setter;
 
 import java.util.*;
 
 public final class Patient {
-    @Setter
+    // getters
     @Getter
     private Long id;
     @Getter
@@ -41,11 +40,15 @@ public final class Patient {
         prescriptions.add(new Prescription(null, medication, dosage, instructions, null));
     }
 
+    public static Patient rehydrate(Long id, Oib oib, PersonName name, BirthDate birthDate, Sex sex) {
+        return new Patient(id, oib, name, birthDate, sex);
+    }
 
     public List<MedicalHistoryEntry> getHistory(){return Collections.unmodifiableList(history);}
     public List<Prescription> getPrescriptions(){return Collections.unmodifiableList(prescriptions);}
 
 
+    public void setId(Long id){this.id=id;}
     public List<MedicalHistoryEntry> mutableHistory(){ return history; }
     public List<Prescription> mutablePrescriptions(){ return prescriptions; }
 }
