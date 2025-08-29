@@ -1,4 +1,4 @@
-package com.pppk;
+package com.pppk.app;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
