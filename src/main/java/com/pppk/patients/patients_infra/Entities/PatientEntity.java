@@ -54,6 +54,8 @@ public class PatientEntity {
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
 
+    @Version
+    private Long version;
 
 
     @Column(name = "sex", columnDefinition = "sex_t not null")
