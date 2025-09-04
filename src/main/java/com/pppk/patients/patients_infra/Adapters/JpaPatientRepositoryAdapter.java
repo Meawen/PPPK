@@ -49,27 +49,59 @@ public class JpaPatientRepositoryAdapter implements PatientRepository, OibUnique
         return patientRepo.findByLastNameContainingIgnoreCase(q == null ? "" : q, p)
                 .map(patientMapper::toDomain);
     }
+    private void syncChildren(PatientEntity e, Patient d) {
+
+        if (e.getHistory() != null) e.getHistory().clear();
+        else e.setHistory(new java.util.ArrayList<>());
+        for (MedicalHistoryEntry h : d.getHistory()) {
+            MedicalHistoryEntity he = historyMapper.toEntity(h);
+            he.setPatient(e);
+            e.getHistory().add(he);
+        }
+
+        if (e.getPrescriptions() != null) e.getPrescriptions().clear();
+        else e.setPrescriptions(new java.util.ArrayList<>());
+        for (Prescription pr : d.getPrescriptions()) {
+            PrescriptionEntity pe = prescriptionMapper.toEntity(pr);
+            pe.setPatient(e);
+            e.getPrescriptions().add(pe);
+        }
+    }
 
     @Override
     @Transactional
+
     public Patient save(Patient d) {
-        PatientEntity e = patientMapper.toEntity(d);
+        if (d.getId() == null) {
+            PatientEntity e = patientMapper.toEntity(d);
+            syncChildren(e, d);
+            return patientMapper.toDomain(patientRepo.save(e));
+        }
+
+        PatientEntity e = patientRepo.findById(d.getId())
+                .orElseThrow(() -> new PatientNotFoundException(d.getId()));
+
+        e.setOib(d.getOib().value());
+        e.setFirstName(d.getName().first());
+        e.setLastName(d.getName().last());
+        e.setBirthDate(d.getBirthDate().value());
+        e.setSex(com.pppk.patients.patients_infra.Enums.Sex.valueOf(d.getSex().name()));
 
         e.getHistory().clear();
-        for (MedicalHistoryEntry he : d.getHistory()) {
-            MedicalHistoryEntity hee = historyMapper.toEntity(he);
-            hee.setPatient(e);
-            e.getHistory().add(hee);
-        }
-        e.getPrescriptions().clear();
-        for (Prescription pr : d.getPrescriptions()) {
-            PrescriptionEntity pre = prescriptionMapper.toEntity(pr);
-            pre.setPatient(e);
-            e.getPrescriptions().add(pre);
+        for (var h : d.getHistory()) {
+            var he = historyMapper.toEntity(h);
+            he.setPatient(e);
+            e.getHistory().add(he);
         }
 
-        PatientEntity saved = patientRepo.save(e);
-        return patientMapper.toDomain(saved);
+        e.getPrescriptions().clear();
+        for (var pr : d.getPrescriptions()) {
+            var pe = prescriptionMapper.toEntity(pr);
+            pe.setPatient(e);
+            e.getPrescriptions().add(pe);
+        }
+
+        return patientMapper.toDomain(patientRepo.save(e)); // or return mapper.toDomain(e)
     }
 
     @Override
