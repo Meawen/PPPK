@@ -8,9 +8,15 @@ import org.springframework.context.annotation.ComponentScan;
 import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
 
 @SpringBootApplication
+@EnableJpaRepositories(basePackages = {
+        "com.pppk.patients.patients_infra.Repos",
+        "com.pppk.exams.exams_infra.repos"
+})
+@EntityScan(basePackages = {
+        "com.pppk.patients.patients_infra.Entities",
+        "com.pppk.exams.exams_infra.entities"
+})
 @ComponentScan(basePackages = "com.pppk")
-@EnableJpaRepositories(basePackages = "com.pppk.patients.patients_infra.Repos")
-@EntityScan(basePackages = "com.pppk.patients.patients_infra.Entities")
 public class PppkApplication {
 
 
