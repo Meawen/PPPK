@@ -11,7 +11,8 @@ import org.springframework.web.bind.annotation.*;
 import java.net.URI;
 
 @RestController
-@RequestMapping("/api/patients") // <- prefix
+@RequestMapping("/api/patients")
+
 @RequiredArgsConstructor
 public class PatientController {
     private final PatientAppService app;
@@ -33,7 +34,6 @@ public class PatientController {
         return app.search(surname, PageRequest.of(page, size));
     }
 
-    // OIB lookup (exact match)
     @GetMapping("/by-oib/{oib}")
     public PatientResponse byOib(@PathVariable String oib) { return app.byOib(oib); }
 

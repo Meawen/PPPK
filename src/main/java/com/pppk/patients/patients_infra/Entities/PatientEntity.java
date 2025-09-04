@@ -8,6 +8,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.hibernate.annotations.ColumnDefault;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -45,12 +47,12 @@ public class PatientEntity {
     @Column(name = "birth_date", nullable = false)
     private LocalDate birthDate;
 
-    @NotNull
-    @ColumnDefault("now()")
-    @Column(name = "created_at", nullable = false)
+
+    @CreationTimestamp
+    @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
-    @NotNull
-    @ColumnDefault("now()")
+
+    @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
 
@@ -58,7 +60,8 @@ public class PatientEntity {
     private Long version;
 
 
-    @Column(name = "sex", columnDefinition = "sex_t not null")
+    @Enumerated(EnumType.STRING)
+    @Column(name = "sex", nullable = false, length = 1)
     private Sex sex;
 
     @OneToMany(mappedBy = "patient", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
