@@ -1,13 +1,12 @@
 package com.pppk.patients.patients_infra.Entities;
 
 import jakarta.persistence.*;
+import jakarta.persistence.Table;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import org.hibernate.annotations.ColumnDefault;
-import org.hibernate.annotations.OnDelete;
-import org.hibernate.annotations.OnDeleteAction;
+import org.hibernate.annotations.*;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
@@ -40,13 +39,11 @@ public class MedicalHistoryEntity {
     @Column(name = "end_date")
     private LocalDate endDate;
 
-    @NotNull
-    @ColumnDefault("now()")
-    @Column(name = "created_at", nullable = false)
+    @CreationTimestamp
+    @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
-    @NotNull
-    @ColumnDefault("now()")
+    @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
 

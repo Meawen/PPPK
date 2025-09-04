@@ -1,12 +1,11 @@
 package com.pppk.exams.exams_infra.entities;
 
 import jakarta.persistence.*;
+import jakarta.persistence.Table;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 import lombok.Setter;
-import org.hibernate.annotations.ColumnDefault;
-import org.hibernate.annotations.OnDelete;
-import org.hibernate.annotations.OnDeleteAction;
+import org.hibernate.annotations.*;
 
 import java.time.OffsetDateTime;
 
@@ -35,13 +34,11 @@ public class ExamEntity {
     @Column(name = "notes", length = Integer.MAX_VALUE)
     private String notes;
 
-    @NotNull
-    @ColumnDefault("now()")
-    @Column(name = "created_at", nullable = false)
+    @CreationTimestamp
+    @Column(name = "created_at", nullable = false, updatable = false)
     private OffsetDateTime createdAt;
 
-    @NotNull
-    @ColumnDefault("now()")
+    @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
 
