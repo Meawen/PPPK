@@ -47,7 +47,15 @@ public class PatientController {
     public ResponseEntity<Void> addHistory(@PathVariable Long id, @Valid @RequestBody HistoryRequest r) {
         app.addHistory(id, r); return ResponseEntity.noContent().build();
     }
+    @GetMapping("/{id}/history")
+    public java.util.List<HistoryResponse> history(@PathVariable Long id) {
+        return app.history(id);
+    }
 
+    @GetMapping("/{id}/prescriptions")
+    public java.util.List<PrescriptionResponse> prescriptions(@PathVariable Long id) {
+        return app.prescriptions(id);
+    }
     @PostMapping("/{id}/prescriptions")
     public ResponseEntity<Void> prescribe(@PathVariable Long id, @Valid @RequestBody PrescriptionRequest r) {
         app.prescribe(id, r); return ResponseEntity.noContent().build();

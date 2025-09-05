@@ -7,6 +7,9 @@ import com.pppk.patients.patients_domain.port.*;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.*; import org.springframework.stereotype.Service; import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
+import java.util.stream.Collectors;
+
 @Service @RequiredArgsConstructor
 public class PatientAppService {
     private final PatientRepository repo; private final OibUniquenessChecker oibCheck;
@@ -50,6 +53,28 @@ public class PatientAppService {
         var p = repo.byId(id).orElseThrow();
         p.prescribe(r.medication(), r.dosage(), r.instructions());
         repo.save(p);
+    }
+
+    @Transactional(readOnly = true)
+    public List<HistoryResponse> history(Long id) {
+        var p = repo.byId(id).orElseThrow();
+        return p.getHistory().stream()
+                .map(h -> new HistoryResponse(
+                        h.getDiseaseName(),
+                        h.getPeriod().start(),
+                        h.getPeriod().end()))
+                .collect(Collectors.toList());
+    }
+
+    @Transactional(readOnly = true)
+    public List<PrescriptionResponse> prescriptions(Long id) {
+        var p = repo.byId(id).orElseThrow();
+        return p.getPrescriptions().stream()
+                .map(rx -> new PrescriptionResponse(
+                        rx.getMedication(),
+                        rx.getDosage(),
+                        rx.getInstructions()))
+                .collect(Collectors.toList());
     }
 
     private PatientResponse toResp(Patient p){
