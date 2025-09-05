@@ -1,1 +1,1 @@
-PPPK repo for the subjet project, Done by Lukas Miholić
+PPPK repo for the subject project, done by Lukas Miholić
