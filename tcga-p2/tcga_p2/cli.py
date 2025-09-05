@@ -1,6 +1,9 @@
 from __future__ import annotations
 import json, io, gzip, typer
 import os
+import json
+from typing import Optional
+from .viz import make_patient_plot
 
 from .config import Settings, mongo_db
 from .storage import S3Storage
@@ -9,22 +12,28 @@ from . import etl
 
 cli = typer.Typer(add_completion=False)
 
+
 @cli.command("fetch")
 def fetch_cmd(cohorts_path: str = "cohorts.json"):
     s = Settings(); s.validate()
     store = S3Storage(s)
+
     with open(cohorts_path, "r", encoding="utf-8") as f:
-        cohorts = json.load(f)
-    for cohort, url in cohorts.items():
-        typer.echo(f"\n== {cohort} ==")
-        try:
-            data = xena.download(url)
-            gz, ctype = xena.maybe_gzip(data, url)
-            key = f"gene_expression/{cohort}/gene_expression.tsv.gz"
-            store.put_bytes(key, gz, content_type=ctype)
-            typer.secho(f"✔ uploaded s3://{s.s3_bucket}/{s.s3_prefix}{key}", fg=typer.colors.GREEN)
-        except Exception as e:
-            typer.secho(f"✘ {cohort}: {e}", fg=typer.colors.RED)
+        mapping = json.load(f)
+
+    uploaded = 0
+    for short, url in mapping.items():
+        cohort = f"TCGA-{short}"
+        print(f"→ {cohort} :: {url}")
+        data = xena.download(url)
+        gz, ctype = xena.maybe_gzip(data, url)
+        key = f"gene_expression/{cohort}/gene_expression.tsv.gz"
+        store.put_bytes(key, gz, content_type=ctype)
+        print(f"✔ uploaded s3://{s.s3_bucket}/{(s.s3_prefix or '') + key}")
+        uploaded += 1
+
+    print(f"DONE: {uploaded} cohorts")
+
 
 @cli.command("upload-local")
 def upload_local(cohort: str, path: str):
@@ -50,31 +59,9 @@ def upload_local(cohort: str, path: str):
 
 @cli.command("ingest")
 def ingest_cmd():
-
-    s = Settings(); s.validate()
-    db = mongo_db(s)
-    store = S3Storage(s)
-
-    keys = [k for k in store.list_keys("gene_expression/") if
-            k.endswith("gene_expression.tsv.gz") or k.endswith("gene_expression.tsv")]
-    if not keys:
-        raise SystemExit("No TSVs under raw/* in S3. Run `./run.sh fetch` or `./run.sh upload-local` first.")
-
-    total = 0
-    for key in keys:
-        # key shape: raw/<COHORT>/gene_expression.tsv.gz
-        parts = key.split("/")
-        cohort = parts[1] if len(parts) >= 3 else "UNKNOWN"
-        typer.echo(f"\n== Ingest {cohort} :: {key}")
-        try:
-            n = etl.ingest_key(store, key, cohort, db)
-            total += n
-            typer.secho(f"✔ upserted {n}", fg=typer.colors.GREEN)
-        except Exception as e:
-            typer.secho(f"✘ {cohort}: {e}", fg=typer.colors.RED)
-
-    typer.echo(f"\nTOTAL upserts: {total}")
-
+    from .etl import ingest_all_from_s3
+    n = ingest_all_from_s3()
+    print(f"TOTAL upserts: {n}")
 @cli.command("upload-clinical-local")
 def upload_clinical_local(path: str):
     import io, gzip
@@ -87,20 +74,91 @@ def upload_clinical_local(path: str):
     print(f"✔ uploaded s3://{s.s3_bucket}/{s.s3_prefix}{key}")
 
 @cli.command("clinical")
-def clinical_cmd(local_path: str = typer.Option(None, help="Optional local TSV override")):
+def clinical_cmd(
+    source: str = typer.Option("s3", help="s3|local|http"),
+    key: str = typer.Option(None, help="S3 key if source=s3"),
+    path: str = typer.Option(None, help="Local path if source=local"),
+    url: str = typer.Option(None,  help="HTTP URL if source=http"),
+):
+    from .config import Settings, mongo_db
+    from .storage import S3Storage
+    from .clinical import ingest_clinical_from_s3, ingest_clinical_from_local, ingest_clinical_from_http
 
     s = Settings(); s.validate()
     db = mongo_db(s)
-    from .clinical import ingest_clinical_from_local, ingest_clinical_from_s3, ingest_clinical_from_http
-    if local_path:
-        n = ingest_clinical_from_local(local_path, db)
+
+    if source == "s3":
+        key = key or os.getenv("CLINICAL_S3_KEY")
+        if not key:
+            typer.echo("ERROR: set --key or CLINICAL_S3_KEY", err=True); raise typer.Exit(code=1)
+        n = ingest_clinical_from_s3(S3Storage(s), key, db)
+    elif source == "local":
+        if not path:
+            typer.echo("ERROR: set --path for local", err=True); raise typer.Exit(code=1)
+        n = ingest_clinical_from_local(path, db)
+    elif source == "http":
+        if not url:
+            typer.echo("ERROR: set --url for http", err=True); raise typer.Exit(code=1)
+        n = ingest_clinical_from_http(url, db)
     else:
-        key = os.getenv("CLINICAL_S3_KEY", "").strip()
-        url = os.getenv("CLINICAL_TSV_URL", "").strip()
-        if key:
-            n = ingest_clinical_from_s3(S3Storage(s), key, db)
-        elif url:
-            n = ingest_clinical_from_http(url, db)
-        else:
-            raise SystemExit("Provide --local-path or set CLINICAL_S3_KEY or CLINICAL_TSV_URL in .env")
-    print(f"✔ clinical upserts: {n}")
+        typer.echo("ERROR: source must be s3|local|http", err=True); raise typer.Exit(code=1)
+
+    typer.echo(f"Clinical matched/updated: {n}")
+
+@cli.command("get")
+def get_cmd(patient_id: str, cohort: str):
+    """Dump one patient's expression+clinical as JSON."""
+    s = Settings(); s.validate()
+    db = mongo_db(s)
+    doc = db["gene_expression"].find_one(
+        {"patient_id": patient_id, "cancer_cohort": cohort},
+        {"_id": 0}
+    )
+    if not doc:
+        raise SystemExit("not found")
+    print(json.dumps(doc, ensure_ascii=False, indent=2))
+
+@cli.command("find")
+def find_cmd(cohort: str, gene: str, min: float = typer.Option(None), max: float = typer.Option(None), limit: int = 100):
+    """Find patients in a cohort by gene value range."""
+    s = Settings(); s.validate()
+    db = mongo_db(s)
+    q = {"cancer_cohort": cohort}
+    cond = {}
+    if min is not None: cond["$gte"] = float(min)
+    if max is not None: cond["$lte"] = float(max)
+    if cond:
+        q[f"genes.{gene}"] = cond
+    cur = db["gene_expression"].find(q, {"_id": 0, "patient_id": 1, "genes."+gene: 1, "clinical": 1}).limit(int(limit))
+    for d in cur:
+        print(json.dumps(d, ensure_ascii=False))
+
+@cli.command("viz")
+def viz_cmd(patient_id: str, cohort: str, out_path: Optional[str] = None, upload_s3: bool = False):
+    """Render a PNG bar chart for the 13 genes."""
+    s = Settings(); s.validate()
+    db = mongo_db(s)
+    doc = db["gene_expression"].find_one({"patient_id": patient_id, "cancer_cohort": cohort}, {"_id": 0, "genes": 1})
+    if not doc:
+        raise SystemExit("not found")
+    png = make_patient_plot(patient_id, cohort, doc.get("genes", {}))
+    if upload_s3:
+        key = f"viz/{cohort}/{patient_id}.png"
+        S3Storage(s).put_bytes(key, png, content_type="image/png")
+        print(f"s3://{s.s3_bucket}/{s.s3_prefix + key if s.s3_prefix else key}")
+    else:
+        out_path = out_path or f"{patient_id}_{cohort}.png"
+        with open(out_path, "wb") as f: f.write(png)
+        print(out_path)
+
+@cli.command("serve")
+def serve_cmd(host: str = "0.0.0.0", port: int = 8000, reload: bool = False):
+    """Run the FastAPI service (requires uvicorn)."""
+    import uvicorn
+    uvicorn.run("tcga_p2.api:app", host=host, port=port, reload=reload)
+
+def main():
+    cli()
+
+if __name__ == "__main__":
+    main()

@@ -1,64 +1,76 @@
 from __future__ import annotations
-import os, io, gzip, pandas as pd, requests
+import io, os, gzip, pandas as pd, requests
+from pymongo.database import Database
 from .storage import S3Storage
-from .config import mongo_db, Settings
+from .config import Settings, mongo_db
 
-def _patient_id(sample: str) -> str:
-    parts = str(sample).split("-")
-    return "-".join(parts[:3]) if len(parts) >= 3 else str(sample)
+CLINICAL_KEEP = ["bcr_patient_barcode", "OS", "DSS", "clinical_stage"]
+
+def _patient_id(barcode: str) -> str:
+   
+    parts = str(barcode).split("-")
+    return "-".join(parts[:3]) if len(parts) >= 3 else str(barcode)
 
 def _read_tsv_bytes(b: bytes) -> pd.DataFrame:
-    if b[:2] == b"\x1f\x8b": b = gzip.decompress(b)
+    if b[:2] == b"\x1f\x8b":
+        b = gzip.decompress(b)
     return pd.read_csv(io.BytesIO(b), sep="\t", dtype=str, low_memory=False)
 
 def _read_http(url: str) -> pd.DataFrame:
-    r = requests.get(url, timeout=180); r.raise_for_status()
+    r = requests.get(url, timeout=180)
+    r.raise_for_status()
     return _read_tsv_bytes(r.content)
 
-def _normalize_clinical(df: pd.DataFrame) -> pd.DataFrame:
-    df.columns = [str(c).strip() for c in df.columns]
-
-    def _pick(names):
-        lc = {c.lower(): c for c in df.columns}
-        for n in names:
-            if n.lower() in lc:
-                return lc[n.lower()]
-        return None
-
-    barcode = _pick(["bcr_patient_barcode","submitter_id","patient_id","patient","case_submitter_id"])
-    os_col  = _pick(["OS","OS_STATUS","OS.event","OS_Event","OS.event.status"])
-    dss_col = _pick(["DSS","DSS_STATUS","DSS.event","DSS_Event","DSS.event.status"])
-    stage   = _pick(["clinical_stage","ajcc_pathologic_stage","pathologic_stage","ajcc_stage"])
-
-    if not barcode:
-        raise ValueError(f"clinical TSV missing patient id column; have: {list(df.columns)[:12]}")
+def _slim(df: pd.DataFrame) -> pd.DataFrame:
+    cols = {c.lower(): c for c in df.columns}
+    bc = cols.get("bcr_patient_barcode")
+    os_col = cols.get("os")
+    dss_col = cols.get("dss")
+    stage = cols.get("clinical_stage")
 
     slim = pd.DataFrame()
-    slim["patient_id"] = df[barcode].map(_patient_id)
+    slim["patient_id"] = df[bc].map(_patient_id)
 
-    def _to01(v):
-        if v is None or str(v).strip() in ("", "NA", "NaN", "None"):
-            return None
-        s = str(v).strip().lower()
-        if ":" in s:
-            s = s.split(":", 1)[0]
-        if s in ("1","1.0","yes","true","deceased","dead","recurred/progressed","recurrence"): return 1
-        if s in ("0","0.0","no","false","living","alive","diseasefree","disease free"): return 0
-        try:
-            x = int(float(s))
-            return 1 if x == 1 else 0 if x == 0 else None
-        except:
-            return None
+    def _to01(x: str | float | int | None):
+        if pd.isna(x): return None
+        x = str(x).strip()
+        if x in {"1", "0"}: return int(x)
+        if x.lower() in {"na", "nan", ""}: return None
+        return 1 if x.lower() in {"true", "yes"} else 0 if x.lower() in {"false", "no"} else None
 
-    slim["OS"]  = df[os_col].map(_to01)  if os_col  else None
-    slim["DSS"] = df[dss_col].map(_to01) if dss_col else None
-    slim["clinical_stage"] = df[stage].replace(["", "NA", "NaN"], None) if stage else None
+    if os_col:  slim["OS"]  = df[os_col].map(_to01)
+    if dss_col: slim["DSS"] = df[dss_col].map(_to01)
+    if stage:   slim["clinical_stage"] = df[stage].replace(["", "NA", "NaN"], None)
 
-    agg = {
-        "OS": "max",
-        "DSS": "max",
-        "clinical_stage": "last",
-    }
+    agg = {"OS": "max", "DSS": "max", "clinical_stage": "last"}
     slim = slim.groupby("patient_id", as_index=False).agg({k: v for k, v in agg.items() if k in slim.columns})
-    return slim[["patient_id","DSS","OS","clinical_stage"]]
 
+    for k in ("OS", "DSS", "clinical_stage"):
+        if k not in slim.columns: slim[k] = None
+    return slim[["patient_id", "DSS", "OS", "clinical_stage"]]
+
+def _merge_into_mongo(slim: pd.DataFrame, db: Database) -> int:
+
+    coll = db["gene_expression"]
+    total = 0
+    for row in slim.itertuples(index=False):
+        clinical = {"DSS": getattr(row, "DSS"), "OS": getattr(row, "OS"), "clinical_stage": getattr(row, "clinical_stage")}
+        res = coll.update_many({"patient_id": getattr(row, "patient_id")},
+                               {"$set": {"clinical": clinical}})
+        total += res.matched_count
+    return total
+
+
+def ingest_clinical_from_local(path: str, db: Database) -> int:
+    with open(path, "rb") as f:
+        df = _read_tsv_bytes(f.read())
+    return _merge_into_mongo(_slim(df), db)
+
+def ingest_clinical_from_s3(store: S3Storage, key: str, db: Database) -> int:
+    body = store.get_bytes(key)
+    df = _read_tsv_bytes(body)
+    return _merge_into_mongo(_slim(df), db)
+
+def ingest_clinical_from_http(url: str, db: Database) -> int:
+    df = _read_http(url)
+    return _merge_into_mongo(_slim(df), db)
