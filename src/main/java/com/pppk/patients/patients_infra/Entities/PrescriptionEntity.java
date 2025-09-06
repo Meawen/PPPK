@@ -22,15 +22,12 @@ public class PrescriptionEntity {
     @Column(name = "id", nullable = false)
     private Long id;
 
-    @NotNull
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @OnDelete(action = OnDeleteAction.CASCADE)
+    @ManyToOne(optional = false, fetch = FetchType.LAZY)
     @JoinColumn(name = "patient_id", nullable = false)
     private PatientEntity patient;
 
-    @NotNull
-    @ColumnDefault("now()")
-    @Column(name = "prescribed_at", nullable = false)
+    @CreationTimestamp
+    @Column(name = "prescribed_at", nullable = false, updatable = false)
     private OffsetDateTime prescribedAt;
 
     @NotNull

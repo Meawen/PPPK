@@ -28,9 +28,9 @@ public interface PatientMapper {
     @AfterMapping
     default void fillCollections(PatientEntity e, @MappingTarget Patient target,
                                  MedicalHistoryMapper hm, PrescriptionMapper pm) {
-        if (e.getHistory() != null) {
+        if (e.getHistories() != null) {
             target.mutableHistory().addAll(
-                    e.getHistory().stream().map(hm::toDomain).toList()
+                    e.getHistories().stream().map(hm::toDomain).toList()
             );
         }
         if (e.getPrescriptions() != null) {
@@ -49,7 +49,7 @@ public interface PatientMapper {
             @Mapping(target = "birthDate",  expression = "java(d.getBirthDate().value())"),
             @Mapping(target = "sex",
                     expression = "java(com.pppk.patients.patients_infra.Enums.Sex.valueOf(d.getSex().name()))") ,
-            @Mapping(target = "history",    ignore = true),
+            @Mapping(target = "histories",    ignore = true),
             @Mapping(target = "prescriptions", ignore = true),
             @Mapping(target = "createdAt",  ignore = true),
             @Mapping(target = "updatedAt",  ignore = true)

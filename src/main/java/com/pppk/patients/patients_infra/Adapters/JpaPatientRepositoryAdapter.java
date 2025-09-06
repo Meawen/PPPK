@@ -49,36 +49,58 @@ public class JpaPatientRepositoryAdapter implements PatientRepository, OibUnique
         return patientRepo.findByLastNameContainingIgnoreCase(q == null ? "" : q, p)
                 .map(patientMapper::toDomain);
     }
-    private void syncChildren(PatientEntity e, Patient d) {
 
-        if (e.getHistory() != null) e.getHistory().clear();
-        else e.setHistory(new java.util.ArrayList<>());
-        for (MedicalHistoryEntry h : d.getHistory()) {
-            MedicalHistoryEntity he = historyMapper.toEntity(h);
-            he.setPatient(e);
-            e.getHistory().add(he);
+    private void syncChildren(PatientEntity e, Patient d) {
+        if (e.getHistories() == null) e.setHistories(new java.util.ArrayList<>());
+        if (e.getPrescriptions() == null) e.setPrescriptions(new java.util.ArrayList<>());
+
+        var histById = new java.util.HashMap<Long, MedicalHistoryEntity>();
+        for (var he : e.getHistories()) if (he.getId() != null) histById.put(he.getId(), he);
+
+        var rxById = new java.util.HashMap<Long, PrescriptionEntity>();
+        for (var pe : e.getPrescriptions()) if (pe.getId() != null) rxById.put(pe.getId(), pe);
+
+        for (var h : d.getHistory()) {
+            if (h.getId() == null) {
+                var he = historyMapper.toEntity(h);
+                he.setPatient(e);
+                e.getHistories().add(he);
+            } else {
+                var he = histById.get(h.getId());
+                if (he != null) {
+                    he.setDiseaseName(h.getDiseaseName());
+                    he.setStartDate(h.getPeriod().start());
+                    he.setEndDate(h.getPeriod().end());
+                }
+            }
         }
 
-        if (e.getPrescriptions() != null) e.getPrescriptions().clear();
-        else e.setPrescriptions(new java.util.ArrayList<>());
-        for (Prescription pr : d.getPrescriptions()) {
-            PrescriptionEntity pe = prescriptionMapper.toEntity(pr);
-            pe.setPatient(e);
-            e.getPrescriptions().add(pe);
+        for (var pr : d.getPrescriptions()) {
+            if (pr.getId() == null) {
+                var pe = prescriptionMapper.toEntity(pr);
+                pe.setPatient(e);
+                e.getPrescriptions().add(pe);
+            } else {
+                var pe = rxById.get(pr.getId());
+                if (pe != null) {
+                    pe.setMedication(pr.getMedication());
+                    pe.setDosage(pr.getDosage());
+                    pe.setInstructions(pr.getInstructions());
+                }
+            }
         }
     }
 
+
     @Override
     @Transactional
-
     public Patient save(Patient d) {
         if (d.getId() == null) {
-            PatientEntity e = patientMapper.toEntity(d);
-            syncChildren(e, d);
+            var e = patientMapper.toEntity(d);
+            syncChildren(e, d);                      // adds all new children
             return patientMapper.toDomain(patientRepo.save(e));
         }
-
-        PatientEntity e = patientRepo.findById(d.getId())
+        var e = patientRepo.findById(d.getId())
                 .orElseThrow(() -> new PatientNotFoundException(d.getId()));
 
         e.setOib(d.getOib().value());
@@ -87,21 +109,8 @@ public class JpaPatientRepositoryAdapter implements PatientRepository, OibUnique
         e.setBirthDate(d.getBirthDate().value());
         e.setSex(com.pppk.patients.patients_infra.Enums.Sex.valueOf(d.getSex().name()));
 
-        e.getHistory().clear();
-        for (var h : d.getHistory()) {
-            var he = historyMapper.toEntity(h);
-            he.setPatient(e);
-            e.getHistory().add(he);
-        }
-
-        e.getPrescriptions().clear();
-        for (var pr : d.getPrescriptions()) {
-            var pe = prescriptionMapper.toEntity(pr);
-            pe.setPatient(e);
-            e.getPrescriptions().add(pe);
-        }
-
-        return patientMapper.toDomain(patientRepo.save(e)); // or return mapper.toDomain(e)
+        syncChildren(e, d);                          // merge, no deletes
+        return patientMapper.toDomain(patientRepo.save(e));
     }
 
     @Override

@@ -10,29 +10,23 @@ import org.hibernate.annotations.*;
 
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
-
 @Getter
 @Setter
-@Entity
 @NoArgsConstructor
+@Entity
 @Table(name = "medical_history")
+@DynamicInsert @DynamicUpdate
 public class MedicalHistoryEntity {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    @Column(name = "id", nullable = false)
+    @Id @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @NotNull
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @OnDelete(action = OnDeleteAction.CASCADE)
     @JoinColumn(name = "patient_id", nullable = false)
     private PatientEntity patient;
 
-    @NotNull
-    @Column(name = "disease_name", nullable = false, length = Integer.MAX_VALUE)
+    @Column(name = "disease_name", nullable = false)
     private String diseaseName;
 
-    @NotNull
     @Column(name = "start_date", nullable = false)
     private LocalDate startDate;
 
@@ -46,6 +40,4 @@ public class MedicalHistoryEntity {
     @UpdateTimestamp
     @Column(name = "updated_at", nullable = false)
     private OffsetDateTime updatedAt;
-
-
 }
