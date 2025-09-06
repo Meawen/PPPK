@@ -67,7 +67,11 @@ export const listExams = async (patientId: number, page = 0, size = 20) => {
     const r = await api.get('/api/exams', { params: { patientId, page, size } });
     return toArray(r.data);
 }
+export const listHistory = async (pid: number) =>
+    toArray((await api.get(`/api/patients/${pid}/history`)).data);
 
+export const listPrescriptions = async (pid: number) =>
+    toArray((await api.get(`/api/patients/${pid}/prescriptions`)).data);
 export const listExamTypes = async () => {
     const r = await api.get('/api/exams/types');
     return toArray(r.data);

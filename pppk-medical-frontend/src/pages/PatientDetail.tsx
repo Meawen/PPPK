@@ -3,7 +3,8 @@ import { Link, useNavigate, useParams } from 'react-router-dom'
 import {
     getPatient, updatePatient, deletePatient,
     listExams, listExamTypes, createExam,
-    addHistory, prescribe, listAttachments, addAttachment
+    addHistory, prescribe, listAttachments, addAttachment,
+    listHistory, listPrescriptions
 } from '../lib/api'
 import type {
     PatientResponse, UpdatePatientRequest, ExamResponse, ExamTypeResponse,
@@ -20,12 +21,26 @@ export default function PatientDetail() {
     const [exams, setExams] = useState<ExamResponse[]>([])
     const [types, setTypes] = useState<ExamTypeResponse[]>([])
     const [examForm, setExamForm] = useState<CreateExamRequest>({ patientId: pid })
-    const [hist, setHist] = useState<HistoryRequest>({})
-    const [rx, setRx] = useState<PrescriptionRequest>({})
+    const [hist, setHist] = useState<HistoryRequest>({ diseaseName: '', startDate: '', endDate: '' })
+    const [rx, setRx] = useState<PrescriptionRequest>({ medication: '', dosage: '', instructions: '' })
     const [selectedExamId, setSelectedExamId] = useState<number | null>(null)
     const [atts, setAtts] = useState<AttachmentResponse[]>([])
     const [attForm, setAttForm] = useState<AttachmentRequest>({})
     const [attErr, setAttErr] = useState('')
+    const [historyList, setHistoryList] = useState<any[]>([])
+    const [rxList, setRxList] = useState<any[]>([])
+    const [histErr, setHistErr] = useState('')
+    const [rxErr, setRxErr] = useState('')
+
+    // helpers
+    const toArray = (x: any): any[] =>
+        Array.isArray(x) ? x :
+            Array.isArray(x?.content) ? x.content :
+                Array.isArray(x?.items) ? x.items : []
+
+    const opt = (s?: string) => (s && s.trim() !== '' ? s : undefined)
+    const dateOnly = (s?: string) =>
+        !s ? undefined : /^\d{4}-\d{2}-\d{2}$/.test(s) ? s : new Date(s).toISOString().slice(0,10)
 
     const fileToSha256Hex = async (file: File) => {
         const buf = await file.arrayBuffer()
@@ -62,17 +77,13 @@ export default function PatientDetail() {
         }
     }
 
-    // Normalizer to handle arrays OR pageable payloads {content:[...]} / {items:[...]}
-    const toArray = (x: any): any[] =>
-        Array.isArray(x) ? x :
-            Array.isArray(x?.content) ? x.content :
-                Array.isArray(x?.items) ? x.items : []
-
     const load = async () => {
-        const [patient, exRaw, tRaw] = await Promise.all([
+        const [patient, exRaw, tRaw, hRaw, rxRaw] = await Promise.all([
             getPatient(pid),
             listExams(pid, 0, 50),
-            listExamTypes()
+            listExamTypes(),
+            listHistory(pid),
+            listPrescriptions(pid),
         ])
         setP(patient)
         setEdit({
@@ -81,10 +92,11 @@ export default function PatientDetail() {
             birthDate: patient.birthDate,
             sex: patient.sex
         })
-
         const ex = toArray(exRaw) as ExamResponse[]
         setExams(ex)
         setTypes(toArray(tRaw) as ExamTypeResponse[])
+        setHistoryList(Array.isArray(hRaw) ? hRaw : [])
+        setRxList(Array.isArray(rxRaw) ? rxRaw : [])
 
         if (ex.length) {
             const firstId = ex[0].id!
@@ -112,20 +124,43 @@ export default function PatientDetail() {
         }
     }
 
-    const addHist = async () => { await addHistory(pid, hist); alert('History added') }
-    const addRx = async () => { await prescribe(pid, rx); alert('Prescription added') }
+    const addHist = async () => {
+        try {
+            setHistErr('')
+            if (!hist.diseaseName?.trim()) { setHistErr('Disease name is required'); return }
+            if (!hist.startDate) { setHistErr('Start date is required'); return } // backend @NotNull
+            await addHistory(pid, {
+                diseaseName: hist.diseaseName.trim(),
+                startDate: dateOnly(hist.startDate)!,             // REQUIRED
+                endDate: dateOnly(hist.endDate)                   // optional
+            })
+            setHistoryList(await listHistory(pid))
+            setHist({ diseaseName: '', startDate: '', endDate: '' })
+        } catch (e:any) {
+            setHistErr(e?.response?.data?.message || 'Failed to add history')
+        }
+    }
+
+    const addRx = async () => {
+        try {
+            setRxErr('')
+            if (!rx.medication?.trim()) { setRxErr('Medication is required'); return }
+            await prescribe(pid, {
+                medication: rx.medication.trim(),
+                dosage: opt(rx.dosage),
+                instructions: opt(rx.instructions)
+            })
+            setRxList(await listPrescriptions(pid))
+            setRx({ medication: '', dosage: '', instructions: '' })
+        } catch (e:any) {
+            setRxErr(e?.response?.data?.message || 'Failed to add prescription')
+        }
+    }
 
     const chooseExam = async (eid: number) => {
         setSelectedExamId(eid)
         const aRaw = await listAttachments(eid)
         setAtts(toArray(aRaw) as AttachmentResponse[])
-    }
-
-    const addAtt = async () => {
-        if (!selectedExamId) return
-        const a = await addAttachment(selectedExamId, attForm)
-        setAtts(prev => [a, ...(Array.isArray(prev) ? prev : [])])
-        setAttForm({})
     }
 
     if (!p) return <div className="p-4">Loading…</div>
@@ -154,21 +189,53 @@ export default function PatientDetail() {
 
                 <div className="card space-y-3">
                     <div className="h2">Add History</div>
+                    {histErr && <div className="text-red-600 text-sm">{histErr}</div>}
                     <div className="grid grid-cols-2 gap-3">
-                        <input className="input" placeholder="Disease name" onChange={e=>setHist(v=>({...v, diseaseName:e.target.value}))}/>
-                        <input className="input" type="date" placeholder="Start" onChange={e=>setHist(v=>({...v, startDate:e.target.value}))}/>
-                        <input className="input" type="date" placeholder="End" onChange={e=>setHist(v=>({...v, endDate:e.target.value}))}/>
+                        <input className="input" placeholder="Disease name" value={hist.diseaseName||''}
+                               onChange={e=>setHist(v=>({...v, diseaseName:e.target.value}))}/>
+                        <input className="input" type="date" value={hist.startDate||''}
+                               onChange={e=>setHist(v=>({...v, startDate:e.target.value}))}/>
+                        <input className="input" type="date" value={hist.endDate||''}
+                               onChange={e=>setHist(v=>({...v, endDate:e.target.value}))}/>
                         <button className="btn" onClick={addHist}>Add</button>
                     </div>
 
                     <div className="h2 mt-4">Add Prescription</div>
+                    {rxErr && <div className="text-red-600 text-sm">{rxErr}</div>}
                     <div className="grid grid-cols-3 gap-3">
-                        <input className="input" placeholder="Medication" onChange={e=>setRx(v=>({...v, medication:e.target.value}))}/>
-                        <input className="input" placeholder="Dosage" onChange={e=>setRx(v=>({...v, dosage:e.target.value}))}/>
-                        <input className="input" placeholder="Instructions" onChange={e=>setRx(v=>({...v, instructions:e.target.value}))}/>
-                        <button className="btn" onClick={addRx}>Prescribe</button>
+                        <input className="input" placeholder="Medication" value={rx.medication||''}
+                               onChange={e=>setRx(v=>({...v, medication:e.target.value}))}/>
+                        <input className="input" placeholder="Dosage" value={rx.dosage||''}
+                               onChange={e=>setRx(v=>({...v, dosage:e.target.value}))}/>
+                        <input className="input" placeholder="Instructions" value={rx.instructions||''}
+                               onChange={e=>setRx(v=>({...v, instructions:e.target.value}))}/>
+                        <button className="btn" onClick={addRx} disabled={!rx.medication?.trim()}>Prescribe</button>
                     </div>
                 </div>
+            </div>
+
+            <div className="card space-y-2">
+                <div className="h2">History</div>
+                <table className="min-w-full text-sm"><tbody>
+                {(historyList||[]).map((h,i)=>(
+                    <tr key={i} className="border-t"><td className="py-2">
+                        {h.diseaseName} — {h.startDate} → {h.endDate ?? '…'}
+                    </td></tr>
+                ))}
+                {!historyList?.length && <tr><td className="py-4 text-slate-500">No history.</td></tr>}
+                </tbody></table>
+            </div>
+
+            <div className="card space-y-2">
+                <div className="h2">Prescriptions</div>
+                <table className="min-w-full text-sm"><tbody>
+                {(rxList||[]).map((r,i)=>(
+                    <tr key={i} className="border-t"><td className="py-2">
+                        {r.medication} • {r.dosage} — {r.instructions}
+                    </td></tr>
+                ))}
+                {!rxList?.length && <tr><td className="py-4 text-slate-500">No prescriptions.</td></tr>}
+                </tbody></table>
             </div>
 
             <div className="card space-y-4">
